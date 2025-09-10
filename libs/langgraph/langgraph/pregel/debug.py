@@ -186,66 +186,72 @@ def tasks_w_writes(
 ) -> tuple[PregelTask, ...]:
     """Apply writes / subgraph states to tasks to be returned in a StateSnapshot."""
     pending_writes = pending_writes or []
+
+    # Preprocess pending_writes for O(1) lookups per (task_id, channel)
+    write_map: dict[str, dict[str, list]] = {}
+    for tid, chan, val in pending_writes:
+        per_task = write_map.setdefault(tid, {})
+        per_task.setdefault(chan, []).append(val)
+
     out: list[PregelTask] = []
+    states_get = states.get if states else lambda _id: None
+    is_output_keys_str = isinstance(output_keys, str)
+
     for task in tasks:
-        rtn = next(
-            (
-                val
-                for tid, chan, val in pending_writes
-                if tid == task.id and chan == RETURN
-            ),
-            MISSING,
-        )
+        task_id = task.id
+        task_writes = write_map.get(task_id, {})
+
+        # Fast lookup for RETURN (first occurrence)
+        rtn = task_writes.get(RETURN, [MISSING])[0]
+
+        # Fast lookup for ERROR (first occurrence)
+        error_val = task_writes.get(ERROR, [None])[0]
+
+        # INTERRUPT can have multiple values
+        ints = []
+        if INTERRUPT in task_writes:
+            for vv in task_writes[INTERRUPT]:
+                if isinstance(vv, Sequence) and not isinstance(vv, (str, bytes)):
+                    ints.extend(vv)
+                else:
+                    ints.append(vv)
+        ints = tuple(ints)
+
+        # Any write except ERROR or INTERRUPT?
+        has_non_err_int = False
+        for chan in task_writes:
+            if chan != ERROR and chan != INTERRUPT:
+                has_non_err_int = True
+                break
+
+        # Compute outputs field
+        if has_non_err_int:
+            if rtn is not MISSING:
+                outputs = rtn
+            elif is_output_keys_str:
+                val = task_writes.get(output_keys, [None])[0]
+                outputs = val
+            else:
+                outputs = {
+                    chan: task_writes[chan][0]
+                    for chan in output_keys
+                    if chan in task_writes
+                }
+        else:
+            outputs = None
+
         out.append(
             PregelTask(
                 task.id,
                 task.name,
                 task.path,
-                next(
-                    (
-                        exc
-                        for tid, n, exc in pending_writes
-                        if tid == task.id and n == ERROR
-                    ),
-                    None,
-                ),
-                tuple(
-                    v
-                    for tid, n, vv in pending_writes
-                    if tid == task.id and n == INTERRUPT
-                    for v in (vv if isinstance(vv, Sequence) else [vv])
-                ),
-                states.get(task.id) if states else None,
-                (
-                    rtn
-                    if rtn is not MISSING
-                    else next(
-                        (
-                            val
-                            for tid, chan, val in pending_writes
-                            if tid == task.id and chan == output_keys
-                        ),
-                        None,
-                    )
-                    if isinstance(output_keys, str)
-                    else {
-                        chan: val
-                        for tid, chan, val in pending_writes
-                        if tid == task.id
-                        and (
-                            chan == output_keys
-                            if isinstance(output_keys, str)
-                            else chan in output_keys
-                        )
-                    }
-                )
-                if any(
-                    w[0] == task.id and w[1] not in (ERROR, INTERRUPT)
-                    for w in pending_writes
-                )
-                else None,
+                error_val,
+                ints,
+                states_get(task_id),
+                outputs,
             )
         )
+
     return tuple(out)
 
 
