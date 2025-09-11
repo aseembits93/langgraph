@@ -47,9 +47,12 @@ def read_channels(
         values: dict[str, Any] = {}
         for k in select:
             try:
-                values[k] = read_channel(channels, k, catch=not skip_empty)
+                values[k] = channels[k].get()
             except EmptyChannelError:
-                pass
+                if skip_empty:
+                    pass
+                else:
+                    raise
         return values
 
 
