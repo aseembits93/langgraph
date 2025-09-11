@@ -15,18 +15,19 @@ def _no_op_stream_writer(c: Any) -> None:
 
 
 def get_config() -> RunnableConfig:
+    var_config = var_child_runnable_config.get()
+    if var_config:
+        return var_config
     if sys.version_info < (3, 11):
         try:
+            # Only check for async task if config isn't found, to reduce exception overhead
             if asyncio.current_task():
                 raise RuntimeError(
                     "Python 3.11 or later required to use this in an async context"
                 )
         except RuntimeError:
             pass
-    if var_config := var_child_runnable_config.get():
-        return var_config
-    else:
-        raise RuntimeError("Called get_config outside of a runnable context")
+    raise RuntimeError("Called get_config outside of a runnable context")
 
 
 def get_store() -> BaseStore:
