@@ -41,7 +41,7 @@ def recast_checkpoint_ns(ns: str) -> str:
         str: The checkpoint namespace without task IDs.
     """
     return NS_SEP.join(
-        part.split(NS_END)[0] for part in ns.split(NS_SEP) if not part.isdigit()
+        [part.split(NS_END, 1)[0] for part in ns.split(NS_SEP) if not part.isdigit()]
     )
 
 
