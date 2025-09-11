@@ -7,7 +7,6 @@ from inspect import (
     signature,
 )
 from itertools import zip_longest
-from types import FunctionType
 from typing import (
     Any,
     Callable,
@@ -70,16 +69,31 @@ def _get_branch_path_input_schema(
             callable_ = path
 
         if callable_ is not None and (hints := get_type_hints(callable_)):
-            first_parameter_name = next(
-                iter(signature(cast(FunctionType, callable_)).parameters.keys())
-            )
-            if input_hint := hints.get(first_parameter_name):
-                if isinstance(input_hint, type) and get_type_hints(input_hint):
-                    input = input_hint
+            first_parameter_name = _get_first_param_name_from_callable(callable_)
+            if first_parameter_name is not None:
+                if input_hint := hints.get(first_parameter_name):
+                    if isinstance(input_hint, type) and get_type_hints(input_hint):
+                        input = input_hint
     except (TypeError, StopIteration):
         pass
 
     return input
+
+
+def _get_first_param_name_from_callable(fn: Callable) -> str | None:
+    if isfunction(fn) or ismethod(fn):
+        code = fn.__code__
+        if code.co_argcount:
+            return code.co_varnames[0]
+        else:
+            return None
+    try:
+        parameters = signature(fn).parameters
+        if parameters:
+            return next(iter(parameters.keys()))
+    except (TypeError, ValueError, StopIteration):
+        pass
+    return None
 
 
 class BranchSpec(NamedTuple):
