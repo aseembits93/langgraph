@@ -177,17 +177,21 @@ class Interrupt:
     ) -> None:
         self.value = value
 
-        if (
-            (ns := deprecated_kwargs.get("ns", MISSING)) is not MISSING
-            and (id == _DEFAULT_INTERRUPT_ID)
-            and (isinstance(ns, Sequence))
-        ):
-            self.id = xxh3_128_hexdigest("|".join(ns).encode())
+        # Fast path: if there are no deprecated_kwargs, skip all extra work
+        if not deprecated_kwargs:
+            self.id = id
+            return
+
+        ns = deprecated_kwargs.get("ns", MISSING)
+        if ns is not MISSING and id == _DEFAULT_INTERRUPT_ID and isinstance(ns, Sequence):
+            # Use a generator expression to avoid creating a temporary list in join
+            self.id = xxh3_128_hexdigest("|".join(map(str, ns)).encode())
         else:
             self.id = id
 
     @classmethod
     def from_ns(cls, value: Any, ns: str) -> Interrupt:
+        # Avoid double encoding or unnecessary overhead; .encode() is correct
         return cls(value=value, id=xxh3_128_hexdigest(ns.encode()))
 
     @property
