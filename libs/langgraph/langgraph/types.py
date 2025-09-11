@@ -188,6 +188,7 @@ class Interrupt:
 
     @classmethod
     def from_ns(cls, value: Any, ns: str) -> Interrupt:
+        # Usage in raise path only, not perf hot path
         return cls(value=value, id=xxh3_128_hexdigest(ns.encode()))
 
     @property
@@ -491,32 +492,31 @@ def interrupt(value: Any) -> Any:
     Raises:
         GraphInterrupt: On the first invocation within the node, halts execution and surfaces the provided value to the client.
     """
-    from langgraph._internal._constants import (
-        CONFIG_KEY_CHECKPOINT_NS,
-        CONFIG_KEY_SCRATCHPAD,
-        CONFIG_KEY_SEND,
-        RESUME,
-    )
+    # Hot-loop import kept, but moved other imports outside local
+    from langgraph._internal._constants import (CONFIG_KEY_CHECKPOINT_NS,
+                                                CONFIG_KEY_SCRATCHPAD,
+                                                CONFIG_KEY_SEND, RESUME)
     from langgraph.config import get_config
-    from langgraph.errors import GraphInterrupt
 
     conf = get_config()["configurable"]
-    # track interrupt index
     scratchpad = conf[CONFIG_KEY_SCRATCHPAD]
     idx = scratchpad.interrupt_counter()
-    # find previous resume values
-    if scratchpad.resume:
-        if idx < len(scratchpad.resume):
-            conf[CONFIG_KEY_SEND]([(RESUME, scratchpad.resume)])
-            return scratchpad.resume[idx]
-    # find current resume value
+    resume = scratchpad.resume
+    resume_len = len(resume)
+    send = conf[CONFIG_KEY_SEND]
+    if resume:
+        # Inline lookup of resume and length, single call per hot path
+        if idx < resume_len:
+            send([(RESUME, resume)])
+            return resume[idx]
     v = scratchpad.get_null_resume(True)
     if v is not None:
-        assert len(scratchpad.resume) == idx, (scratchpad.resume, idx)
-        scratchpad.resume.append(v)
-        conf[CONFIG_KEY_SEND]([(RESUME, scratchpad.resume)])
+        assert len(resume) == idx, (resume, idx)
+        resume.append(v)
+        send([(RESUME, resume)])
         return v
-    # no resume value found
+    # Imports moved outside hot path
+    from langgraph.errors import GraphInterrupt
     raise GraphInterrupt(
         (
             Interrupt.from_ns(
